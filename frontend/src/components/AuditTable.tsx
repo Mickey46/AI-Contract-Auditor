@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, ChevronRight,
-  Filter, Download, CheckCircle, AlertCircle, AlertTriangle,
+  Filter, Download, CheckCircle, AlertCircle, AlertTriangle, MessageSquare,
 } from 'lucide-react'
 import type { AuditReport, AuditRow } from '../types'
 import { sourceTypeIcon, locationLabel } from '../types'
@@ -10,6 +10,7 @@ import { cn } from '../utils/cn'
 
 interface Props {
   report: AuditReport
+  onAskAbout: (question: string) => void
 }
 
 const STATUS_META: Record<string, { badge: string; icon: React.ReactNode; bar: string }> = {
@@ -41,7 +42,7 @@ const FIELD_LABELS: Record<string, string> = {
 type SortKey = 'sku' | 'field_checked' | 'expected_value' | 'actual_value' | 'delta' | 'status'
 type FilterStatus = 'ALL' | 'PASS' | 'FAIL' | 'WARN'
 
-export function AuditTable({ report }: Props) {
+export function AuditTable({ report, onAskAbout }: Props) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('ALL')
   const [filterSku, setFilterSku]       = useState('')
   const [sortKey, setSortKey]           = useState<SortKey>('status')
@@ -265,9 +266,9 @@ export function AuditTable({ report }: Props) {
                                         <span className="text-xs font-semibold text-slate-200">
                                           {locationLabel(ev)}
                                         </span>
-                                        {ev.score != null && (
+                                        {ev.similarity_score != null && (
                                           <span className="ml-auto text-xs text-slate-500 font-mono">
-                                            {(ev.score * 100).toFixed(0)}% match
+                                            {(ev.similarity_score * 100).toFixed(0)}% match
                                           </span>
                                         )}
                                       </div>
@@ -282,6 +283,30 @@ export function AuditTable({ report }: Props) {
                                 </div>
                               </div>
                             )}
+
+                            {/* Ask AI button */}
+                            <div className="flex justify-end pt-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const fieldLabel = FIELD_LABELS[row.field_checked] ?? row.field_checked
+                                  const q = row.field_checked === 'total_amount'
+                                    ? `For ${row.sku}, the invoice total was ${row.actual_value} but the correct total should be ${row.expected_value}. ` +
+                                      `The total is computed as: quantity × unit_price × (1 − discount%) × (1 + tax%). ` +
+                                      `Can you look up the contract terms for ${row.sku} — what is the authoritative unit price, discount percentage, and tax rate? ` +
+                                      `Which document defines each of those values and what section or row are they in?`
+                                    : `Audit finding: ${row.sku} — ${fieldLabel}. ` +
+                                      `Expected ${row.expected_value} but invoice shows ${row.actual_value} (${row.status}). ` +
+                                      `${row.explanation} ` +
+                                      `Which contract document defines ${fieldLabel} as ${row.expected_value} for ${row.sku}? Please cite the exact section or row.`
+                                  onAskAbout(q)
+                                }}
+                                className="flex items-center gap-1.5 text-xs font-medium text-blue-400 border border-blue-700 hover:bg-blue-950/40 px-3 py-1.5 rounded-lg transition-colors"
+                              >
+                                <MessageSquare size={12} />
+                                Ask AI about this finding
+                              </button>
+                            </div>
                           </div>
                         </td>
                       </tr>

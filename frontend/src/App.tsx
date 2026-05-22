@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { ShieldCheck, MessageSquare, BarChart3, Menu, Loader2, CheckCircle, XCircle } from 'lucide-react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { ShieldCheck, MessageSquare, BarChart3, Menu, Loader2, CheckCircle, XCircle, ChevronsDown } from 'lucide-react'
 import { AuditTable }    from './components/AuditTable'
 import { ContractQA }    from './components/ContractQA'
 import { RiskDashboard } from './components/RiskDashboard'
@@ -30,11 +30,14 @@ export default function App() {
   const [loading,     setLoading]     = useState(false)
   const [apiKey,      setApiKey]      = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [qaQuestion,  setQaQuestion]  = useState<string | undefined>()
 
   const wsRef         = useRef<WebSocket | null>(null)
   const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
   const terminalRef   = useRef(false)
   const userPickedTab = useRef(false)
+  const contentRef    = useRef<HTMLDivElement>(null)
+  const [showScrollDown, setShowScrollDown] = useState(false)
 
   function stopAll() {
     if (wsRef.current)   { wsRef.current.close(); wsRef.current = null }
@@ -89,7 +92,32 @@ export default function App() {
     }
   }
 
+  // Scroll content area to top whenever results first arrive
+  const reportJobId = jobStatus?.report?.job_id
+  useEffect(() => {
+    if (reportJobId && contentRef.current) {
+      contentRef.current.scrollTop = 0
+    }
+  }, [reportJobId])
+
+  // Track scroll position to show/hide the down-arrow button
+  const handleContentScroll = useCallback(() => {
+    const el = contentRef.current
+    if (!el) return
+    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80
+    setShowScrollDown(!nearBottom)
+  }, [])
+
   function handleTabClick(tab: Tab) { userPickedTab.current = true; setActiveTab(tab) }
+
+  function handleAskAbout(question: string) {
+    userPickedTab.current = true
+    setActiveTab('qa')
+    // Reset first so the same question can be re-fired if user clicks again
+    setQaQuestion(undefined)
+    setTimeout(() => setQaQuestion(question), 50)
+  }
+
   useEffect(() => () => stopAll(), [])
 
   const report: AuditReport | null = jobStatus?.report ?? null
@@ -265,12 +293,27 @@ export default function App() {
                   ))}
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-5">
-                  {activeTab === 'audit' && <AuditTable report={report} />}
+                <div
+                  ref={contentRef}
+                  onScroll={handleContentScroll}
+                  className="flex-1 overflow-y-auto p-5 relative"
+                >
+                  {activeTab === 'audit' && <AuditTable report={report} onAskAbout={handleAskAbout} />}
                   {activeTab === 'qa'    && (
                     <div className="h-full" style={{ minHeight: '480px' }}>
-                      <ContractQA jobId={report.job_id} apiKey={apiKey} report={report} />
+                      <ContractQA jobId={report.job_id} apiKey={apiKey} report={report} seedQuestion={qaQuestion} />
                     </div>
+                  )}
+
+                  {/* Floating scroll-to-bottom button */}
+                  {showScrollDown && activeTab === 'audit' && (
+                    <button
+                      onClick={() => contentRef.current?.scrollTo({ top: contentRef.current.scrollHeight, behavior: 'smooth' })}
+                      className="sticky bottom-4 float-right flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-200 text-xs font-medium px-3 py-1.5 rounded-full shadow-lg transition-colors"
+                    >
+                      <ChevronsDown size={13} />
+                      Scroll to bottom
+                    </button>
                   )}
                 </div>
               </div>

@@ -15,6 +15,7 @@ interface Props {
   jobId: string
   apiKey: string
   report: AuditReport
+  seedQuestion?: string
 }
 
 /** Build context-aware suggested questions from the actual audit rows */
@@ -56,7 +57,7 @@ function buildSuggestions(report: AuditReport): string[] {
   return suggestions.slice(0, 4)
 }
 
-export function ContractQA({ jobId, apiKey, report }: Props) {
+export function ContractQA({ jobId, apiKey, report, seedQuestion }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -65,16 +66,25 @@ export function ContractQA({ jobId, apiKey, report }: Props) {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const scrollRef  = useRef<HTMLDivElement>(null)
-  const bottomRef  = useRef<HTMLDivElement>(null)
+  const scrollRef   = useRef<HTMLDivElement>(null)
+  const lastMsgRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // Scroll only the chat container, not the whole page
-    const container = scrollRef.current
-    if (container) {
-      container.scrollTop = container.scrollHeight
+    // Scroll so the TOP of the latest message is visible — not the bottom.
+    // This way the user reads the answer from the start, not lands at the end.
+    if (lastMsgRef.current && scrollRef.current) {
+      const container = scrollRef.current
+      const el = lastMsgRef.current
+      // Scroll the container so the element's top aligns with the container's top
+      container.scrollTop = el.offsetTop - container.offsetTop - 8
     }
   }, [messages])
+
+  // Fire when a row's "Ask AI" button passes a pre-formed question
+  useEffect(() => {
+    if (seedQuestion) send(seedQuestion)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedQuestion])
 
   const SUGGESTED = useMemo(() => buildSuggestions(report), [report])
 
@@ -98,7 +108,7 @@ export function ContractQA({ jobId, apiKey, report }: Props) {
     <div className="flex flex-col h-full">
       <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 p-4 scrollbar-thin">
         {messages.map((msg, i) => (
-          <div key={i} className={cn('flex gap-3', msg.role === 'user' ? 'justify-end' : '')}>
+          <div key={i} ref={i === messages.length - 1 ? lastMsgRef : null} className={cn('flex gap-3', msg.role === 'user' ? 'justify-end' : '')}>
             {msg.role === 'assistant' && (
               <div className="shrink-0 w-7 h-7 rounded-full bg-blue-700 flex items-center justify-center text-xs font-bold text-white mt-0.5">
                 AI
@@ -149,7 +159,7 @@ export function ContractQA({ jobId, apiKey, report }: Props) {
             Searching contract documents...
           </div>
         )}
-        <div ref={bottomRef} />
+        <div />
       </div>
 
       {/* Suggested questions */}
