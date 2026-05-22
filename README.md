@@ -52,7 +52,7 @@ Real-time progress streams to the browser via WebSocket so you see each step as 
 - WebSocket endpoint for live progress updates
 
 **Frontend (React + Vite + TypeScript)**
-- Slide-out upload drawer (API key, contract drop zone, invoice drop zone)
+- Slide-out upload drawer (contract drop zone, invoice drop zone)
 - Live progress panel — shows each pipeline stage, per-SKU completion chips appearing as they finish, elapsed timer
 - Audit table with clickable accordion rows — click any row to expand the full AI explanation + source evidence cards inline (no separate page)
 - Contract Q&A tab with suggested questions generated from the actual FAILed rows in the audit
@@ -111,36 +111,47 @@ Auditor caught all 6 FAILs correctly on the first run.
 
 ## Running it
 
-**Prerequisites:** Python 3.9+, Node 18+, OpenAI API key
+**Prerequisites:** Python 3.9+, Node 18+, an OpenAI API key with access to o3 (or gpt-4o as fallback)
+
+### 1. Set up your API key
+
+The app reads your OpenAI key from a `.env` file — you only set it once.
 
 ```bash
-# 1. Backend
+# backend
+cp backend/.env.example backend/.env
+```
+
+Open `backend/.env` and put your key in:
+
+```
+OPENAI_API_KEY=sk-proj-your-key-here
+```
+
+That's it. The backend picks it up on startup, no need to paste it in the UI every time.
+
+Both `.env` files are already in `.gitignore` so you won't accidentally push your key.
+
+### 2. Start the backend
+
+```bash
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
-# Optional: set your key in .env so you don't paste it every time
-cp .env.example .env
-# edit .env → OPENAI_API_KEY=sk-proj-...
-
 uvicorn app.main:app --port 8000
+```
 
-# 2. Frontend (separate terminal)
+### 3. Start the frontend
+
+```bash
 cd frontend
-
-# Optional: same thing for the UI pre-fill
-cp .env.example .env
-# edit .env → VITE_OPENAI_API_KEY=sk-proj-...
-
 npm install
 npm run dev
 # → http://localhost:5173
 ```
 
-Open the app, click **Upload** in the top left, add your contracts + invoice, and hit **Run Audit**. If you added your key to `.env` the field pre-fills automatically. Otherwise paste it in the panel.
-
-> **Note on the `.env` files:** both are git-ignored already. Never commit an API key.
+Open the app, click **Upload**, drop your contracts + invoice, hit **Run Audit**. Done.
 
 ---
 
