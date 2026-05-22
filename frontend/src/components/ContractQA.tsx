@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { Send, MessageSquare, Loader2 } from 'lucide-react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
+import { Send, Loader2 } from 'lucide-react'
 import { askQuestion } from '../api/client'
-import type { QAResponse } from '../types'
+import type { AuditReport, QAResponse } from '../types'
 import { locationLabel, sourceTypeIcon } from '../types'
 import { cn } from '../utils/cn'
 
@@ -14,9 +14,49 @@ interface Message {
 interface Props {
   jobId: string
   apiKey: string
+  report: AuditReport
 }
 
-export function ContractQA({ jobId, apiKey }: Props) {
+/** Build context-aware suggested questions from the actual audit rows */
+function buildSuggestions(report: AuditReport): string[] {
+  const skus   = [...new Set(report.rows.map(r => r.sku))]
+  const failed = report.rows.filter(r => r.status === 'FAIL')
+
+  const suggestions: string[] = []
+
+  // One question per failed field, most interesting first
+  const failedDiscount = failed.find(r => r.field_checked === 'discount_percent')
+  if (failedDiscount) {
+    suggestions.push(
+      `What is the correct discount percentage for ${failedDiscount.sku}?`
+    )
+  }
+
+  const failedPrice = failed.find(r => r.field_checked === 'unit_price')
+  if (failedPrice) {
+    suggestions.push(
+      `Which document changed the unit price for ${failedPrice.sku}?`
+    )
+  }
+
+  // Ask about a SKU that fully passed (shows contrast)
+  const passedSku = skus.find(s => report.rows.filter(r => r.sku === s).every(r => r.status === 'PASS'))
+  if (passedSku) {
+    suggestions.push(`What are the contract terms for ${passedSku}?`)
+  }
+
+  // Generic fallback questions using real SKUs from this audit
+  if (suggestions.length < 4 && skus[0]) {
+    suggestions.push(`What tax rate applies to ${skus[0]}?`)
+  }
+  if (suggestions.length < 4 && skus.length > 1) {
+    suggestions.push(`Which contract document has the highest authority for ${skus[1]}?`)
+  }
+
+  return suggestions.slice(0, 4)
+}
+
+export function ContractQA({ jobId, apiKey, report }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -31,12 +71,7 @@ export function ContractQA({ jobId, apiKey }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const SUGGESTED = [
-    'What is the unit price for CP-001?',
-    'What discount applies to EL-003?',
-    'Which document amended the DM-004 pricing?',
-    'What is the tax rate for all services?',
-  ]
+  const SUGGESTED = useMemo(() => buildSuggestions(report), [report])
 
   async function send(text = input) {
     if (!text.trim() || loading) return

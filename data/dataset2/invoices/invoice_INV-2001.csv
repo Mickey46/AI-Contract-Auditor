@@ -1,0 +1,5 @@
+invoice_id,invoice_date,sku,description,quantity,unit_price,discount_percent,tax_percent,total_amount
+INV-2001,2026-04-15,SRV-101,Cloud Storage (GB/mo),500000,0.08,5,10,41800.0
+INV-2001,2026-04-15,API-202,API Calls (per 1k),80000,2.5,0,10,220000.0
+INV-2001,2026-04-15,SUP-303,Premium Support (hrs),120,150,10,10,17820.0
+INV-2001,2026-04-15,LIC-404,Software Licenses,300,45,15,10,12622.5

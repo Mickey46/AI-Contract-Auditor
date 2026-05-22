@@ -269,7 +269,7 @@ export default function App() {
                   {activeTab === 'audit' && <AuditTable report={report} />}
                   {activeTab === 'qa'    && (
                     <div className="h-full" style={{ minHeight: '480px' }}>
-                      <ContractQA jobId={report.job_id} apiKey={apiKey} />
+                      <ContractQA jobId={report.job_id} apiKey={apiKey} report={report} />
                     </div>
                   )}
                 </div>
