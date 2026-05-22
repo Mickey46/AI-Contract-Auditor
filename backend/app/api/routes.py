@@ -1,4 +1,9 @@
-"""FastAPI routes: POST /api/audit, GET /api/audit/{id}, GET /audit/{id}/download, POST /api/ask."""
+"""
+FastAPI routes — async audit pipeline with:
+  • WebSocket endpoint /ws/audit/{job_id}: real-time push instead of polling
+  • asyncio.gather() for parallel per-SKU LLM extraction (all SKUs run concurrently)
+  • asyncio.to_thread() for every blocking I/O operation (ingest, embed, extract)
+"""
 
 from __future__ import annotations
 import asyncio
@@ -7,7 +12,7 @@ import io
 import os
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
 from app.models.schemas import JobStatus, QAResponse
@@ -24,10 +29,42 @@ router = APIRouter()
 
 _jobs: dict[str, JobStatus] = {}
 _vectorstores: dict[str, object] = {}
+_subscribers: dict[str, list[WebSocket]] = {}  # job_id → open WebSocket connections
 
 UPLOAD_DIR = "/tmp/contract_auditor_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+
+# ── WebSocket broadcast helpers ────────────────────────────────────────────────
+
+async def _broadcast(job_id: str) -> None:
+    """Push current job state to every WebSocket subscriber for this job."""
+    if job_id not in _jobs:
+        return
+    payload = _jobs[job_id].model_dump_json()
+    dead: list[WebSocket] = []
+    for ws in _subscribers.get(job_id, []):
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _subscribers[job_id].remove(ws)
+
+
+async def _notify(job_id: str, message: str) -> None:
+    """Update job status message and broadcast to subscribers."""
+    current = _jobs.get(job_id)
+    _jobs[job_id] = JobStatus(
+        job_id=job_id,
+        status="running",
+        message=message,
+        report=current.report if current else None,
+    )
+    await _broadcast(job_id)
+
+
+# ── Audit pipeline ─────────────────────────────────────────────────────────────
 
 async def _run_audit_job(
     job_id: str,
@@ -38,38 +75,48 @@ async def _run_audit_job(
     invoice_filename: str,
 ) -> None:
     try:
-        _jobs[job_id] = JobStatus(job_id=job_id, status="running", message="Parsing invoice...")
+        await _notify(job_id, "Parsing invoice...")
 
-        # 1. Parse invoice (gives us SKUs + descriptions for free)
+        # 1. Parse invoice CSV — sync, fast
         invoice_lines = parse_invoice(invoice_path)
         sku_to_desc: dict[str, str] = {}
         for line in invoice_lines:
             sku_to_desc.setdefault(line.sku, line.description)
 
-        # 2. Ingest contract docs into chunks (PDF / DOCX / XLSX / EML)
-        _jobs[job_id].message = "Ingesting and chunking contract documents..."
-        chunks = ingest_documents(contract_paths)
+        # 2. Ingest contract docs — wrapped in thread so it doesn't block the event loop
+        await _notify(job_id, f"Ingesting {len(contract_paths)} contract file(s)...")
+        chunks = await asyncio.to_thread(ingest_documents, contract_paths)
 
-        # 3. Embed chunks into ChromaDB
-        _jobs[job_id].message = f"Embedding {len(chunks)} chunks into ChromaDB..."
+        # 3. Embed into ChromaDB — network + disk I/O, runs in thread
+        await _notify(job_id, f"Embedding {len(chunks)} chunks into ChromaDB...")
         collection_name = f"job_{job_id}"
         vectorstore = await asyncio.to_thread(embed_chunks, chunks, collection_name, openai_api_key)
         _vectorstores[job_id] = vectorstore
 
-        # 4. For each unique SKU: retrieve top-K + LLM extraction
-        contract_terms = {}
-        for sku, desc in sku_to_desc.items():
-            _jobs[job_id].message = f"Extracting contract terms for {sku}..."
+        # 4. Parallel per-SKU LLM extraction — all SKUs run concurrently via gather()
+        skus = list(sku_to_desc.items())
+        completed = 0
+        lock = asyncio.Lock()
+
+        async def _extract_one(sku: str, desc: str):
+            nonlocal completed
             term = await asyncio.to_thread(
                 extract_contract_term, sku, desc, vectorstore, openai_api_key
             )
-            contract_terms[sku] = term
+            async with lock:
+                completed += 1
+                await _notify(job_id, f"Extracted {sku} ({completed}/{len(skus)})")
+            return sku, term
 
-        # 5. Compare invoice lines vs contract terms
-        _jobs[job_id].message = "Comparing invoice against contract terms..."
+        await _notify(job_id, f"Extracting contract terms for {len(skus)} SKU(s) in parallel...")
+        results = await asyncio.gather(*[_extract_one(sku, desc) for sku, desc in skus])
+        contract_terms = dict(results)
+
+        # 5. Compare — pure Python, fast
+        await _notify(job_id, "Comparing invoice lines against contract terms...")
         audit_rows = compare_invoice(invoice_lines, contract_terms)
 
-        # 6. Build report
+        # 6. Build and publish final report
         report = build_report(
             job_id=job_id,
             invoice_file=invoice_filename,
@@ -78,6 +125,7 @@ async def _run_audit_job(
         )
         report.model_used = resolve_reasoning_model(openai_api_key)
         _jobs[job_id] = JobStatus(job_id=job_id, status="done", report=report)
+        await _broadcast(job_id)
 
     except Exception as exc:
         import traceback
@@ -86,11 +134,11 @@ async def _run_audit_job(
             status="error",
             message=f"{exc}\n{traceback.format_exc()}",
         )
+        await _broadcast(job_id)
         raise
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
-
+# ── HTTP endpoints ─────────────────────────────────────────────────────────────
 
 @router.post("/audit", response_model=dict)
 async def start_audit(
@@ -173,3 +221,30 @@ async def ask_question(
         raise HTTPException(status_code=404, detail="No indexed documents for this job")
     vectorstore = _vectorstores[job_id]
     return await asyncio.to_thread(run_qa, question, vectorstore, openai_api_key)
+
+
+# ── WebSocket endpoint ─────────────────────────────────────────────────────────
+
+@router.websocket("/ws/audit/{job_id}")
+async def ws_audit_status(websocket: WebSocket, job_id: str) -> None:
+    """
+    Real-time audit progress stream.
+    Client connects immediately after POST /audit and receives every status
+    update as JSON without polling.
+    """
+    await websocket.accept()
+    _subscribers.setdefault(job_id, []).append(websocket)
+
+    # Send the current state right away (job may already be in progress)
+    if job_id in _jobs:
+        await websocket.send_text(_jobs[job_id].model_dump_json())
+
+    try:
+        # Hold the connection open until the client disconnects.
+        # receive_text() blocks until a message or disconnect.
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        subs = _subscribers.get(job_id, [])
+        if websocket in subs:
+            subs.remove(websocket)
