@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { FileSearch, MessageSquare, BarChart3, Menu, Loader2, CheckCircle, XCircle } from 'lucide-react'
+import { ShieldCheck, MessageSquare, BarChart3, Menu, Loader2, CheckCircle, XCircle } from 'lucide-react'
 import { AuditTable }    from './components/AuditTable'
 import { ContractQA }    from './components/ContractQA'
 import { RiskDashboard } from './components/RiskDashboard'
@@ -144,7 +144,7 @@ export default function App() {
 
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-6 h-6 rounded-md bg-blue-600 flex items-center justify-center shrink-0">
-                <FileSearch size={13} className="text-white" />
+                <ShieldCheck size={13} className="text-white" />
               </div>
               <span className="font-bold text-slate-100 text-sm whitespace-nowrap">AI Contract Auditor</span>
             </div>
@@ -186,7 +186,7 @@ export default function App() {
           {!report && !loading && (
             <div className="flex flex-col items-center justify-center flex-1 text-center">
               <div className="w-20 h-20 rounded-3xl bg-slate-800/80 border border-slate-700 flex items-center justify-center mb-5">
-                <FileSearch size={32} className="text-slate-500" />
+                <ShieldCheck size={32} className="text-slate-500" />
               </div>
               <h2 className="text-xl font-semibold text-slate-300">No audit running</h2>
               <p className="text-sm text-slate-500 mt-2 max-w-xs leading-relaxed">

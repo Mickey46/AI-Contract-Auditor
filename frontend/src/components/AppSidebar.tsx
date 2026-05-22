@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react'
-import { X, FileSearch } from 'lucide-react'
+import { X, ShieldCheck } from 'lucide-react'
 import { UploadPanel } from './UploadPanel'
 
 interface Props {
@@ -40,7 +40,7 @@ export function AppSidebar({ open, onClose, loading, onAuditStart }: Props) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
-              <FileSearch size={14} className="text-white" />
+              <ShieldCheck size={14} className="text-white" />
             </div>
             <div>
               <p className="font-semibold text-slate-100 text-sm leading-none">Run Audit</p>

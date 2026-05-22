@@ -65,10 +65,15 @@ export function ContractQA({ jobId, apiKey, report }: Props) {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef  = useRef<HTMLDivElement>(null)
+  const bottomRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Scroll only the chat container, not the whole page
+    const container = scrollRef.current
+    if (container) {
+      container.scrollTop = container.scrollHeight
+    }
   }, [messages])
 
   const SUGGESTED = useMemo(() => buildSuggestions(report), [report])
@@ -91,7 +96,7 @@ export function ContractQA({ jobId, apiKey, report }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto space-y-4 p-4 scrollbar-thin">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 p-4 scrollbar-thin">
         {messages.map((msg, i) => (
           <div key={i} className={cn('flex gap-3', msg.role === 'user' ? 'justify-end' : '')}>
             {msg.role === 'assistant' && (
