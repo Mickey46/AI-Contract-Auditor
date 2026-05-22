@@ -1,333 +1,161 @@
-# AI Contract Auditor Agent
+# AI Contract Auditor
 
 ![License: Personal Reference Only](https://img.shields.io/badge/license-Personal%20Reference%20Only-red)
 ![No Commercial Use](https://img.shields.io/badge/commercial%20use-prohibited-critical)
 
-A production-grade, full-stack system that audits invoices against multi-format contract documents using a multi-strategy RAG pipeline — structured parsing, regex extraction, and LLM reasoning — with confidence scoring, override tracking, and a React UI.
+I built this for a CVS Health take-home assignment. The problem: organizations store pricing, discounts, and billing rules across a bunch of different documents — PDFs, Excel sheets, DOCX amendments, email threads — and invoices don't always match. I wanted to build something that actually reads all those docs, figures out what the *real* contract terms are (including amendments that override base prices), and flags every mismatch with evidence.
+
+It works on any vendor, any industry. I tested it on both a healthcare claims dataset and a SaaS cloud vendor dataset — same system, zero config changes.
 
 ---
 
 ## Demo
 
-> **Watch the full walkthrough** → [▶ demo.mov](https://github.com/Mickey46/rag/releases/latest/download/demo.mov)
-
-The demo covers:
-- Uploading all 4 contract documents (PDF, XLSX, DOCX, EML) + invoice CSV
-- Live audit run with real-time progress (embedding → extraction → reconciliation → comparison)
-- Audit results table with confidence scores, dollar impact, and source citations
-- Evidence drawer showing contract-vs-invoice side-by-side comparison
-- AI chat Q&A — asking *"What is the unit price for CP-001?"* and getting a cited answer pinpointing the exact sheet and section
-- Manual override flow with reviewer sign-off and audit log
+> [▶ Watch the walkthrough](https://github.com/Mickey46/AI-Contract-Auditor/releases/latest/download/demo.mov)
 
 ---
 
-## Architecture
+## How it works
+
+Upload your contracts + invoice, hit Run Audit. The backend does five things in order:
 
 ```
-Contract Documents (PDF, XLSX, DOCX, EML)
-         │
-         ▼
-┌──────────────────────────────────────────┐
-│  INGESTION & CHUNKING                    │
-│  pdfplumber / openpyxl / python-docx     │
-│  Each chunk carries: source_file,        │
-│  page_number, sheet_name, row_range,     │
-│  section, doc_precedence                 │
-└───────────────┬──────────────────────────┘
-                │
-                ▼
-┌──────────────────────────────────────────┐
-│  EFFECTIVE-DATE FILTER                   │
-│  Drops amendment chunks not yet active  │
-│  or expired relative to invoice_date    │
-└───────────────┬──────────────────────────┘
-                │
-         ┌──────┴─────────────────────────┐
-         │                                │
-         ▼                                ▼
-┌─────────────────┐            ┌──────────────────────┐
-│ STRUCTURED      │            │ EMBED → CHROMADB     │
-│ Excel Parser    │            │ text-embedding-3-    │
-│ (deterministic) │            │ large (3072-dim),    │
-│ Base prices,    │            │ collection           │
-│ volume tiers,   │            └──────────┬───────────┘
-│ discount log    │                       │
-└────────┬────────┘                       ▼
-         │                     ┌──────────────────────┐
-         │        ┌────────────│  REGEX EXTRACTOR     │
-         │        │            │  Pattern-match on all│
-         │        │            │  chunks for price/   │
-         │        │            │  discount revisions  │
-         │        │            └──────────┬───────────┘
-         │        │                       │
-         │        │            ┌──────────▼───────────┐
-         │        │            │  LLM EXTRACTOR        │
-         │        │            │  Per-field RAG query  │
-         │        │            │  + gpt-4o/o3/        │
-         │        │            │  gpt-5.5-thinking     │
-         │        │            └──────────┬───────────┘
-         │        │                       │
-         │        │            ┌──────────▼───────────┐
-         │        │            │  HALLUCINATION GUARD  │
-         │        │            │  Fuzzy-verify excerpts│
-         │        │            │  exist in source      │
-         │        │            └──────────┬───────────┘
-         │        │                       │
-         └────────┴───────────────────────┘
-                              │
-                              ▼
-              ┌───────────────────────────────┐
-              │  RECONCILER (per field)       │
-              │  Priority: lower prec# wins   │
-              │  1=email > 2=DOCX > 3=Excel   │
-              │  > 4=PDF                      │
-              │                               │
-              │  Confidence:                  │
-              │  1.00  all 3 agree            │
-              │  0.95  struct + LLM agree     │
-              │  0.92  regex + LLM agree      │
-              │  0.85  LLM value verbatim     │
-              │  0.80  DOCX overrides Excel   │
-              │  0.40  real conflict          │
-              └───────────────┬───────────────┘
-                              │
-                              ▼
-              ┌───────────────────────────────┐
-              │  COMPARATOR                   │
-              │  Volume-tier aware totals     │
-              │  PASS / FAIL / WARN           │
-              │  + dollar_impact per field    │
-              │  + confidence, review_flag    │
-              └───────────────┬───────────────┘
-                              │
-                              ▼
-              ┌───────────────────────────────┐
-              │  REACT UI                     │
-              │  Risk Dashboard               │
-              │  Audit Table (sorted by conf) │
-              │  Side-by-side Comparison      │
-              │  Evidence Drawer + Override   │
-              │  Audit Trail Log              │
-              │  Contract Q&A (RAG)           │
-              │  Batch Upload                 │
-              └───────────────────────────────┘
+1. Parse invoice CSV
+         ↓
+2. Ingest contracts → chunk with metadata
+   (PDF page, Excel sheet+row, DOCX section, EML body)
+         ↓
+3. Embed chunks → ChromaDB (text-embedding-3-large)
+         ↓
+4. Per-SKU LLM extraction — all SKUs run in parallel
+   RAG retrieves top-K chunks per field, stuffs them into
+   a prompt with precedence labels, o3 reasons over them
+   and returns the authoritative value + which source won
+         ↓
+5. Compare each invoice field vs contract term → PASS/FAIL
 ```
 
----
+The key thing that makes it accurate: every contract document gets a **precedence number** (1=email > 2=DOCX > 3=Excel > 4=PDF). When two docs say different things, the one with the lower number wins. So if a DOCX amendment says CP-001 price is $5.00 but the base PDF still says $5.50, the system picks $5.00 — and shows you exactly where it found it.
 
-## Dataset
-
-Synthetic but realistic. Generated by `scripts/generate_dataset.py`.
-
-| File | Format | Contents |
-|------|--------|----------|
-| `master_contract.pdf` | PDF | Base contract — SKU definitions, base pricing, tax/discount policy |
-| `pricing.xlsx` | Excel (3 sheets) | Base Pricing · Volume Tiers (multi-row headers) · Discounts & Amendments log |
-| `amendment_q2.docx` | DOCX | Q2 amendment — revises CP-001 unit price $5.50→$5.00, increases discounts for CP-001 and EL-003 |
-| `email_addendum.eml` | Email | Email addendum — adds 5% discount for DM-004 |
-| `invoice_INV-1001.csv` | CSV | 4 line items with **intentional mismatches** |
-
-### Intentional Invoice Mismatches
-
-| SKU | Field | Contract (Expected) | Invoice (Actual) | Why it should FAIL |
-|-----|-------|---------------------|------------------|--------------------|
-| CP-001 | unit_price | $5.00 (DOCX amendment) | $5.50 | Invoice ignores Q2 amendment |
-| CP-001 | discount_percent | 10% (DOCX amendment) | 5% | Using old base rate, not amended rate |
-| EL-003 | discount_percent | 12% (DOCX amendment) | 8% | Amendment not applied |
-| DM-004 | discount_percent | 5% (email addendum) | 0% | Email addendum completely ignored |
-| AP-002 | all fields | correct | correct | Baseline PASS case |
+Real-time progress streams to the browser via WebSocket so you see each step as it runs.
 
 ---
 
-## Key Engineering Challenges & How We Solved Them
+## What I built
 
-### Problem 1 — LLM extracts from the wrong (outdated) document
-**Issue:** GPT-4o sometimes retrieved and used the base `pricing.xlsx` values instead of the DOCX/email amendments. This caused CP-001 to show discount=5% (old) instead of 10% (amended).
+**Backend (FastAPI + Python)**
+- Document ingestion for PDF (pdfplumber), DOCX (python-docx), Excel (openpyxl), EML
+- Each chunk carries: source file, page/sheet/section, row range, and a precedence number
+- ChromaDB vector store, one collection per audit job
+- LangChain LCEL chain for Contract Q&A
+- Parallel per-SKU extraction with `asyncio.gather()` — all SKUs hit the LLM at the same time
+- WebSocket endpoint for live progress updates
 
-**Solution:** Built a **Reconciler** (`agents/reconciler.py`) that cross-checks three independent extraction strategies and uses document precedence (`1=email > 2=DOCX > 3=Excel > 4=PDF`) to pick the authoritative value. A DOCX amendment always overrides Excel base pricing — regardless of what the LLM returns.
-
----
-
-### Problem 2 — LLM hallucination / paraphrasing
-**Issue:** GPT-4o occasionally cited excerpts that didn't literally exist in the retrieved chunks, or returned 0.0 for fields it couldn't find (ContractTerm has float defaults).
-
-**Solution:**
-- **Hallucination Guard** (`agents/hallucination_guard.py`) — fuzzy-matches every LLM-cited excerpt back to source chunks. Flags warnings if the overlap ratio is below 70%.
-- **Regex Extractor** (`agents/regex_extractor.py`) — deterministically finds price revision (`"REVISED from $5.50 to $5.00"`) and discount revision (`"5% → 10%"`) patterns directly in text. These findings act as a ground truth check against the LLM.
-- **Confidence score** — if LLM is the only source and the value isn't literally in chunks, confidence drops to 0.55. Only when structured Excel + LLM agree does it reach 0.95+.
-
----
-
-### Problem 3 — Excel volume tier rows matched as pricing rows
-**Issue:** The `TABLE_ROW_RE` regex matched Volume Tier sheet rows like `CP-001 | Claims Processing | 0 | 0 | 2 | 4` (tier discount percentages), extracting `price=0.0`, `discount=0`, `tax=2` — all wrong.
-
-**Solution:** Added a guard in `extract_findings`: skip any TABLE_ROW_RE match where `price <= 0.0` or `tax > 20`. Volume tier percentages are small integers; real prices are never zero.
+**Frontend (React + Vite + TypeScript)**
+- Slide-out upload drawer (API key, contract drop zone, invoice drop zone)
+- Live progress panel — shows each pipeline stage, per-SKU completion chips appearing as they finish, elapsed timer
+- Audit table with clickable accordion rows — click any row to expand the full AI explanation + source evidence cards inline (no separate page)
+- Contract Q&A tab with suggested questions generated from the actual FAILed rows in the audit
+- Nav bar shows live step name while running, then PASS/FAIL summary when done
 
 ---
 
-### Problem 4 — `_find_col` matched `"discount type"` before `"discount (%)"`
-**Issue:** The structured Excel parser's column-finder iterated column-first. For headers `["discount type", "discount (%)"]`, searching needle `"discount"` matched column 2 (`"discount type"`) before column 3 (`"discount (%)"`), so discount values were read from the wrong column — always returning the discount type string instead of the numeric percentage.
+## Dataset 1 — Healthcare Claims (CVS Health scenario)
 
-**Solution:** Rewrote `_find_col` to iterate **needle-first** across all columns. More specific needles (`"discount (%)"`) are tried across all columns before falling back to the broader `"discount"` needle. Result: the numeric discount column is always found correctly.
+| File | What it contains |
+|------|-----------------|
+| `master_contract.pdf` | Base contract — SKU definitions, base pricing |
+| `pricing.xlsx` | 3 sheets: Base Pricing, Volume Tiers, Discounts & Amendments |
+| `amendment_q2.docx` | Q2 amendment — CP-001 price $5.50→$5.00, discount bumps for CP-001 and EL-003 |
+| `email_addendum.eml` | Email addendum — 5% discount added for DM-004 effective 2026-01-01 |
+| `invoice_INV-1001.csv` | 4 line items, intentional mismatches |
 
----
+**What the vendor overbilled:**
 
-### Problem 5 — `_find_header_row` matched "SKU" inside sentences
-**Issue:** The Volume Tiers sheet has a description row: *"Volume thresholds are measured per SKU per calendar month..."*. The old substring-match found this row as the header (it contains "SKU"), so the actual header row (`SKU | Service | Monthly Volume Threshold...`) was never found, and all volume tier lookups silently returned empty.
+| SKU | Field | Contract | Invoice | Why it fails |
+|-----|-------|----------|---------|-------------|
+| CP-001 | unit_price | $5.00 | $5.50 | DOCX amendment ignored |
+| CP-001 | discount_percent | 10% | 5% | Amendment bumped it, invoice didn't |
+| EL-003 | discount_percent | 12% | 8% | Same — amendment not applied |
+| DM-004 | discount_percent | 5% | 0% | Email addendum completely missed |
 
-**Solution:** Changed `_find_header_row` to **exact cell match** — a cell must equal `"sku"` (or start with it), not merely contain the substring. The description row is skipped; the true header row is correctly identified.
-
----
-
-### Problem 6 — PRICE_REVISION_RE extracted partial numbers
-**Issue:** The regex `(?:to\s+)?\$?(?P<new>\d+\.?\d*)` had `to` as optional and the decimal as optional. On the text `"REVISED from $5.50 to $5.00"`, the greedy `.{0,40}` consumed `"$5.0"` leaving only `"0"` for `(?P<new>...)`, extracting `0.0` instead of `5.00`.
-
-**Solution:** Made `to` **required** (`to\s+`) and required a decimal point (`\d+\.\d+`). Since all monetary prices in this domain have cents (e.g., `5.00`, `3.25`), this constraint eliminates partial matches without losing any real matches.
-
----
-
-### Problem 7 — Server running stale code
-**Issue:** After fixing bugs, the backend was restarted without `--reload`, so all subsequent code changes were invisible to the running process. Jobs submitted after the fixes still showed the old (wrong) `exp=0.0` behaviour.
-
-**Solution:** Always start with `uvicorn app.main:app --reload --port 8000`. The reload watcher picks up file changes automatically during development.
+Total overcharge: ~$11,000
 
 ---
 
-## Audit Output Format
+## Dataset 2 — SaaS/Cloud Vendor (NovaTech scenario)
 
-```json
-{
-  "invoice_id": "INV-1001",
-  "line_id": 1,
-  "sku": "CP-001",
-  "field_checked": "unit_price",
-  "expected_value": 5.0,
-  "actual_value": 5.5,
-  "delta": 0.5,
-  "status": "FAIL",
-  "confidence": 0.80,
-  "review_required": true,
-  "sources_agreeing": ["regex", "llm"],
-  "conflicts": ["structured_excel=5.5"],
-  "dollar_impact": 6000.0,
-  "quantity": 12000.0,
-  "explanation": "Invoice unit_price of 5.5 exceeds the contract value of 5.0 (delta: +0.5). Authoritative source: amendment_q2.docx (precedence 2).",
-  "evidence": [
-    {
-      "source_file": "amendment_q2.docx",
-      "section": "Section 2 — Revised Unit Pricing",
-      "excerpt": "Effective January 1, 2026, the unit price for SKU CP-001 is REVISED from $5.50 to $5.00.",
-      "doc_precedence": 2
-    },
-    {
-      "source_file": "pricing.xlsx",
-      "sheet_name": "Base Pricing",
-      "row_range": "4-7",
-      "doc_precedence": 3,
-      "superseded_by": "amendment_q2.docx"
-    }
-  ]
-}
-```
+Same system, different industry. Files in `data/dataset2/`.
+
+| File | What it contains |
+|------|-----------------|
+| `master_saas_contract.pdf` | Base contract — cloud storage, API, support, licensing |
+| `saas_pricing.xlsx` | Base pricing + volume tiers + amendment log |
+| `saas_amendment_q1.docx` | Q1 2026 amendment — SRV-101 price $0.08→$0.06, LIC-404 discount 15%→20% |
+| `novatech_email_addendum.eml` | Email addendum — 5% discount for API-202 |
+| `invoice_INV-2001.csv` | 4 line items, intentional mismatches |
+
+Auditor caught all 6 FAILs correctly on the first run.
 
 ---
 
-## Tech Stack
+## Stuff I ran into and fixed
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| LLM | GPT-4o / o3 / GPT-5.5-thinking | Auto-probed in order; falls back gracefully |
-| Embeddings | **text-embedding-3-large** (OpenAI) | 3072-dim vectors — best accuracy in OpenAI's embedding family |
-| Vector DB | ChromaDB | One collection per audit job |
-| Orchestration | LangChain | RetrievalQA chain for Contract Q&A |
-| Backend | FastAPI + Python 3.9 | Async background jobs |
-| Frontend | React 18 + Vite + TypeScript | |
-| Styling | Tailwind CSS | Dark theme |
-| PDF parsing | pdfplumber | Page-aware chunking |
-| Excel parsing | openpyxl | Multi-sheet, multi-row header aware |
-| DOCX parsing | python-docx | Section-boundary splitting |
+**The `--reload` disaster** — ran uvicorn with `--reload` during dev. On macOS, the `watchfiles` library gets FSEvents from the OS for every file touched in the project directory — including the entire `venv/` folder (thousands of langchain, openpyxl, transformers files). The server was restarting 20+ times in a row before any audit even started, killing mid-run WebSocket connections. Fixed by running without `--reload` in any stable session.
+
+**LLM extraction precedence** — early versions let GPT just pick whatever it wanted from the retrieved chunks. It often grabbed base contract prices instead of amendment values. The fix was baking the precedence rules directly into the extraction prompt: every chunk gets labeled with its authority level, and the LLM is explicitly told "lower number wins." That plus requiring JSON output with a `reasoning` field forces it to explain which source it picked — easy to verify.
+
+**WebSocket stale closure** — the `ws.onclose` handler had a stale closure over `jobStatus` state. After a job finished, `stopAll()` closed the socket, which fired `onclose`, which saw the stale `status="running"` and restarted the polling fallback — which then fetched `status="done"` and called `setActiveTab('audit')`, kicking users off the Q&A tab mid-session. Fixed with a `terminalRef` boolean that gets set to `true` the moment a terminal state is reached, so `onclose` skips the polling restart.
 
 ---
 
-## Setup & Running
+## Running it
 
-### Prerequisites
-- Python 3.9+
-- Node.js 18+
-- OpenAI API key
+**Prerequisites:** Python 3.9+, Node 18+, OpenAI API key
 
-### 1. Generate Dataset
 ```bash
-cd rag/
-python scripts/generate_dataset.py
-```
-
-### 2. Backend
-```bash
-cd backend/
+# Backend
+cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
+uvicorn app.main:app --port 8000
 
-### 3. Frontend
-```bash
-cd frontend/
+# Frontend (separate terminal)
+cd frontend
 npm install
 npm run dev
-# → http://localhost:5173 (or 5174 if 5173 is in use)
+# → http://localhost:5173
 ```
 
-### 4. Usage
-1. Open the frontend URL
-2. Enter your OpenAI API key
-3. Drop all 4 contract files from `data/contracts/`
-4. Drop `data/invoices/invoice_INV-1001.csv`
-5. Click **Run Audit**
-6. Results load with a **Risk Dashboard** (total dollar exposure + top failing SKUs)
-7. The **Audit Table** defaults to sorting by confidence ascending — lowest-confidence rows need review first
-8. Click any row to open the **Evidence Drawer**: side-by-side contract vs invoice comparison, all retrieved source chunks with page/sheet/section citations, and override buttons
-9. Override any AI finding via the drawer — overrides are logged to `/tmp/contract_auditor_logs/{job_id}.jsonl` and shown in the **Override Log** tab
-10. Switch to **Contract Q&A** to ask free-text questions (e.g., "What is the discount for CP-001?") — responses cite the exact source document, page, and section
-11. Use **Batch Audit** to drop multiple invoice CSVs at once
+Then open the app, click **Upload** in the top left, add your contracts + invoice, enter your OpenAI key, and hit **Run Audit**.
 
 ---
 
-## API Endpoints
+## Tech stack
 
-| Method | Path | Description |
+| | |
+|--|--|
+| LLM | o3 (auto-probed, falls back to gpt-4o) |
+| Embeddings | text-embedding-3-large |
+| Vector DB | ChromaDB |
+| RAG orchestration | LangChain LCEL |
+| Backend | FastAPI, Python 3.9, asyncio |
+| Frontend | React 18, Vite, TypeScript, Tailwind CSS |
+| Parsers | pdfplumber, openpyxl, python-docx |
+
+---
+
+## API
+
+| Method | Path | What it does |
 |--------|------|-------------|
-| POST | `/api/audit` | Start an audit job (multipart: contract_files, invoice_file, openai_api_key) |
-| GET | `/api/audit/{job_id}` | Poll job status + full report |
-| GET | `/api/audit/{job_id}/download` | Download audit results as CSV |
-| POST | `/api/audit/{job_id}/override` | Override a row's status with reason + reviewer |
-| GET | `/api/audit/{job_id}/log` | Get JSONL override audit trail |
-| POST | `/api/ask` | Contract Q&A (multipart: job_id, question, openai_api_key) |
+| POST | `/api/audit` | Start audit (multipart: contract_files, invoice_file, openai_api_key) |
+| GET | `/api/audit/{job_id}` | Poll status + full report |
+| GET | `/api/audit/{job_id}/download` | Download results as CSV |
+| POST | `/api/ask` | Contract Q&A (job_id, question, openai_api_key) |
+| WS | `/api/ws/audit/{job_id}` | Live progress stream |
 
 ---
 
-## Sample Verified Results (against `invoice_INV-1001.csv`)
-
-```
-SKU      Field             Expected   Actual   Status  Confidence  $ Impact
--------- ----------------  --------   ------   ------  ----------  --------
-CP-001   unit_price        5.00       5.50     FAIL    80%         +$6,000.00
-CP-001   discount_percent  10.00      5.00     FAIL    95%         +$8,700.00
-CP-001   tax_percent       8.00       8.00     PASS    100%             $0.00
-CP-001   total_amount      57,024.00  67,716   FAIL    50%        +$10,692.00
-AP-002   unit_price        12.00      12.00    PASS    100%             $0.00
-AP-002   discount_percent  0.00       0.00     PASS    100%             $0.00
-AP-002   tax_percent       8.00       8.00     PASS    100%             $0.00
-AP-002   total_amount      2,592.00   2,592.00 PASS    50%              $0.00
-EL-003   unit_price        3.25       3.25     PASS    100%             $0.00
-EL-003   discount_percent  12.00      8.00     FAIL    95%         +$1,105.00
-EL-003   tax_percent       8.00       8.00     PASS    100%             $0.00
-EL-003   total_amount      25,956.45  27,448.2 FAIL    50%         +$1,491.75
-DM-004   unit_price        45.00      45.00    PASS    100%             $0.00
-DM-004   discount_percent  5.00       0.00     FAIL    100%           +$337.50
-DM-004   tax_percent       8.00       8.00     PASS    100%             $0.00
-DM-004   total_amount      6,925.50   7,290.00 FAIL    50%            +$364.50
-
-Total Dollar Exposure: $28,690.75   |   Reviews Required: 8
-```
+*Built by Prajwal N Praju — take-home assignment for CVS Health Innovation Lab*
