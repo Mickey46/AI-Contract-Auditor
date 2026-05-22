@@ -57,6 +57,18 @@ export interface QAResponse {
   sources: QASource[]
 }
 
+export interface HistoryEntry {
+  job_id: string
+  invoice_file: string
+  contract_files: string[]
+  pass_count: number
+  fail_count: number
+  warn_count: number
+  total_lines: number
+  model_used: string | null
+  completed_at: string  // ISO timestamp
+}
+
 export function locationLabel(s: QASource | EvidenceChunk): string {
   const parts = [s.source_file]
   if (s.sheet_name) {

@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { JobStatus, QAResponse } from '../types'
+import type { HistoryEntry, JobStatus, QAResponse } from '../types'
 
 const BASE = '/api'
 
@@ -25,6 +25,11 @@ export async function pollJobStatus(jobId: string): Promise<JobStatus> {
 
 export function downloadAuditCsv(jobId: string): void {
   window.open(`${BASE}/audit/${jobId}/download`, '_blank')
+}
+
+export async function fetchHistory(): Promise<HistoryEntry[]> {
+  const { data } = await axios.get<HistoryEntry[]>(`${BASE}/history`)
+  return data
 }
 
 export async function askQuestion(

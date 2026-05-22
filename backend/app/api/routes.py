@@ -3,21 +3,23 @@ FastAPI routes — async audit pipeline with:
   • WebSocket endpoint /ws/audit/{job_id}: real-time push instead of polling
   • asyncio.gather() for parallel per-SKU LLM extraction (all SKUs run concurrently)
   • asyncio.to_thread() for every blocking I/O operation (ingest, embed, extract)
+  • Completed reports persisted to data/history/ (JSON + CSV) for history API
 """
 
 from __future__ import annotations
 import asyncio
-import csv
-import io
 import os
 import uuid
 
+_ENV_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.models.schemas import JobStatus, QAResponse
 from app.rag.ingestion import ingest_documents
 from app.rag.embedder import embed_chunks
+from app.rag.history import save_report, load_report, list_reports, get_csv_path
 from app.parsers.csv_parser import parse_invoice
 from app.agents.extractor import extract_contract_term
 from app.agents.comparator import compare_invoice
@@ -125,6 +127,10 @@ async def _run_audit_job(
         )
         report.model_used = resolve_reasoning_model(openai_api_key)
         _jobs[job_id] = JobStatus(job_id=job_id, status="done", report=report)
+
+        # 7. Persist to disk (non-blocking) — survives server restarts
+        await asyncio.to_thread(save_report, report)
+
         await _broadcast(job_id)
 
     except Exception as exc:
@@ -145,8 +151,14 @@ async def start_audit(
     background_tasks: BackgroundTasks,
     contract_files: list[UploadFile] = File(...),
     invoice_file: UploadFile = File(...),
-    openai_api_key: str = Form(...),
+    openai_api_key: str = Form(""),
 ) -> dict:
+    # Allow env-based key so users don't have to paste it every time
+    effective_key = openai_api_key.strip() or _ENV_API_KEY
+    if not effective_key:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="OpenAI API key required. Set it in the upload panel or in backend/.env")
+    openai_api_key = effective_key
     job_id = str(uuid.uuid4())[:8]
     job_dir = os.path.join(UPLOAD_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
@@ -175,19 +187,35 @@ async def start_audit(
 
 @router.get("/audit/{job_id}", response_model=JobStatus)
 async def get_job_status(job_id: str) -> JobStatus:
-    if job_id not in _jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return _jobs[job_id]
+    # Check in-memory first (live or recent job)
+    if job_id in _jobs:
+        return _jobs[job_id]
+    # Fall back to disk — survives server restarts
+    report = await asyncio.to_thread(load_report, job_id)
+    if report:
+        return JobStatus(job_id=job_id, status="done", report=report)
+    raise HTTPException(status_code=404, detail="Job not found")
 
 
 @router.get("/audit/{job_id}/download")
-async def download_audit_csv(job_id: str) -> StreamingResponse:
-    if job_id not in _jobs:
+async def download_audit_csv(job_id: str):
+    # Serve pre-saved CSV from disk if available (fastest path)
+    csv_path = await asyncio.to_thread(get_csv_path, job_id)
+    if csv_path:
+        return FileResponse(
+            csv_path,
+            media_type="text/csv",
+            filename=f"audit_{job_id}.csv",
+        )
+
+    # Fall back to generating from memory (job still running or disk write pending)
+    job = _jobs.get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    job = _jobs[job_id]
     if job.status != "done" or not job.report:
         raise HTTPException(status_code=400, detail="Audit not complete")
 
+    import csv, io
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
@@ -202,7 +230,6 @@ async def download_audit_csv(job_id: str) -> StreamingResponse:
             row.expected_value, row.actual_value, row.delta, row.status,
             row.explanation, evidence_str,
         ])
-
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),
@@ -211,12 +238,19 @@ async def download_audit_csv(job_id: str) -> StreamingResponse:
     )
 
 
+@router.get("/history")
+async def get_history() -> list[dict]:
+    """Return a list of all completed audit jobs, newest first."""
+    return await asyncio.to_thread(list_reports)
+
+
 @router.post("/ask", response_model=QAResponse)
 async def ask_question(
     job_id: str = Form(...),
     question: str = Form(...),
-    openai_api_key: str = Form(...),
+    openai_api_key: str = Form(""),
 ) -> QAResponse:
+    openai_api_key = openai_api_key.strip() or _ENV_API_KEY
     if job_id not in _vectorstores:
         raise HTTPException(status_code=404, detail="No indexed documents for this job")
     vectorstore = _vectorstores[job_id]

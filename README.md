@@ -114,21 +114,33 @@ Auditor caught all 6 FAILs correctly on the first run.
 **Prerequisites:** Python 3.9+, Node 18+, OpenAI API key
 
 ```bash
-# Backend
+# 1. Backend
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+
+# Optional: set your key in .env so you don't paste it every time
+cp .env.example .env
+# edit .env → OPENAI_API_KEY=sk-proj-...
+
 uvicorn app.main:app --port 8000
 
-# Frontend (separate terminal)
+# 2. Frontend (separate terminal)
 cd frontend
+
+# Optional: same thing for the UI pre-fill
+cp .env.example .env
+# edit .env → VITE_OPENAI_API_KEY=sk-proj-...
+
 npm install
 npm run dev
 # → http://localhost:5173
 ```
 
-Then open the app, click **Upload** in the top left, add your contracts + invoice, enter your OpenAI key, and hit **Run Audit**.
+Open the app, click **Upload** in the top left, add your contracts + invoice, and hit **Run Audit**. If you added your key to `.env` the field pre-fills automatically. Otherwise paste it in the panel.
+
+> **Note on the `.env` files:** both are git-ignored already. Never commit an API key.
 
 ---
 
@@ -151,8 +163,9 @@ Then open the app, click **Upload** in the top left, add your contracts + invoic
 | Method | Path | What it does |
 |--------|------|-------------|
 | POST | `/api/audit` | Start audit (multipart: contract_files, invoice_file, openai_api_key) |
-| GET | `/api/audit/{job_id}` | Poll status + full report |
-| GET | `/api/audit/{job_id}/download` | Download results as CSV |
+| GET | `/api/audit/{job_id}` | Poll status + full report (falls back to disk after restart) |
+| GET | `/api/audit/{job_id}/download` | Download results as CSV (served from `data/history/`) |
+| GET | `/api/history` | List all past audits (newest first) |
 | POST | `/api/ask` | Contract Q&A (job_id, question, openai_api_key) |
 | WS | `/api/ws/audit/{job_id}` | Live progress stream |
 

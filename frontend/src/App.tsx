@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { ShieldCheck, MessageSquare, BarChart3, Menu, Loader2, CheckCircle, XCircle, ChevronsDown } from 'lucide-react'
+import { ShieldCheck, MessageSquare, BarChart3, Menu, Loader2, CheckCircle, XCircle, ChevronsDown, History } from 'lucide-react'
 import { AuditTable }    from './components/AuditTable'
 import { ContractQA }    from './components/ContractQA'
 import { RiskDashboard } from './components/RiskDashboard'
 import { AuditProgress } from './components/AuditProgress'
 import { AppSidebar }    from './components/AppSidebar'
+import { HistoryPanel }  from './components/HistoryPanel'
 import { startAudit, pollJobStatus } from './api/client'
 import type { AuditReport, JobStatus } from './types'
 import { cn } from './utils/cn'
@@ -31,6 +32,7 @@ export default function App() {
   const [apiKey,      setApiKey]      = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [qaQuestion,  setQaQuestion]  = useState<string | undefined>()
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const wsRef         = useRef<WebSocket | null>(null)
   const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -110,6 +112,15 @@ export default function App() {
 
   function handleTabClick(tab: Tab) { userPickedTab.current = true; setActiveTab(tab) }
 
+  function handleLoadHistory(status: JobStatus) {
+    stopAll()
+    setLoading(false)
+    terminalRef.current = true
+    userPickedTab.current = false
+    setJobStatus(status)
+    setActiveTab('audit')
+  }
+
   function handleAskAbout(question: string) {
     userPickedTab.current = true
     setActiveTab('qa')
@@ -183,17 +194,21 @@ export default function App() {
             {navCenter}
           </div>
 
-          {/* RIGHT: tech stack badges */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            {[
-              { label: 'LangChain', color: 'text-green-400 border-green-800 bg-green-950/40' },
-              { label: 'ChromaDB',  color: 'text-purple-400 border-purple-800 bg-purple-950/40' },
-              { label: 'GPT-4o',   color: 'text-blue-400 border-blue-800 bg-blue-950/40' },
-            ].map(b => (
-              <span key={b.label} className={cn('text-[10px] font-semibold border px-2 py-0.5 rounded-full hidden sm:inline', b.color)}>
-                {b.label}
+          {/* RIGHT: model badge (live from report) + history button */}
+          <div className="flex items-center gap-2 shrink-0">
+            {report?.model_used && (
+              <span className="text-[10px] font-semibold border px-2 py-0.5 rounded-full hidden sm:inline text-blue-400 border-blue-800 bg-blue-950/40">
+                {report.model_used}
               </span>
-            ))}
+            )}
+            <button
+              onClick={() => setHistoryOpen(true)}
+              title="Audit History"
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <History size={13} />
+              <span className="hidden sm:inline">History</span>
+            </button>
           </div>
         </div>
       </header>
@@ -204,6 +219,13 @@ export default function App() {
         onClose={() => setSidebarOpen(false)}
         loading={loading}
         onAuditStart={handleAuditStart}
+      />
+
+      {/* ── Slide-out history panel ──────────────────────────────── */}
+      <HistoryPanel
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onLoad={handleLoadHistory}
       />
 
       {/* ── Main content ─────────────────────────────────────────── */}

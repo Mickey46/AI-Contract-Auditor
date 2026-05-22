@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, FileText, X, Play, Key } from 'lucide-react'
+import { Upload, FileText, X, Play } from 'lucide-react'
 import { cn } from '../utils/cn'
 import { sourceTypeIcon } from '../types'
 
@@ -12,7 +12,6 @@ interface Props {
 export function UploadPanel({ onAuditStart, loading }: Props) {
   const [contracts, setContracts] = useState<File[]>([])
   const [invoice, setInvoice] = useState<File | null>(null)
-  const [apiKey, setApiKey] = useState('')
 
   const contractDrop = useDropzone({
     accept: {
@@ -35,25 +34,10 @@ export function UploadPanel({ onAuditStart, loading }: Props) {
   const removeContract = (i: number) =>
     setContracts((prev) => prev.filter((_, idx) => idx !== i))
 
-  const canRun = contracts.length > 0 && invoice !== null && apiKey.trim().length > 10
+  const canRun = contracts.length > 0 && invoice !== null
 
   return (
     <div className="space-y-6">
-      {/* API Key */}
-      <div className="bg-slate-800/60 rounded-xl border border-slate-700 p-5">
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-300 mb-2">
-          <Key size={14} />
-          OpenAI API Key
-        </label>
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder="sk-proj-..."
-          className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
-
       {/* Contract files drop zone */}
       <div>
         <h3 className="text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wide">
@@ -135,7 +119,7 @@ export function UploadPanel({ onAuditStart, loading }: Props) {
 
       {/* Run button */}
       <button
-        onClick={() => invoice && onAuditStart(contracts, invoice, apiKey)}
+        onClick={() => invoice && onAuditStart(contracts, invoice, '')}
         disabled={!canRun || loading}
         className={cn(
           'w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all',
