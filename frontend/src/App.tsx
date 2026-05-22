@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { FileSearch, MessageSquare, BarChart3, ClipboardList, Layers } from 'lucide-react'
+import { FileSearch, MessageSquare, BarChart3 } from 'lucide-react'
 import { UploadPanel } from './components/UploadPanel'
 import { AuditTable } from './components/AuditTable'
 import { EvidenceDrawer } from './components/EvidenceDrawer'
@@ -7,22 +7,18 @@ import { ContractQA } from './components/ContractQA'
 import { SourcePanel } from './components/SourcePanel'
 import { StatusBar } from './components/StatusBar'
 import { RiskDashboard } from './components/RiskDashboard'
-import { AuditLogPanel } from './components/AuditLogPanel'
-import { BatchUpload } from './components/BatchUpload'
 import { startAudit, pollJobStatus } from './api/client'
 import type { AuditRow, AuditReport, JobStatus } from './types'
 import { cn } from './utils/cn'
 
-type Tab = 'audit' | 'qa' | 'log' | 'batch'
+type Tab = 'audit' | 'qa'
 
 export default function App() {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null)
   const [selectedRow, setSelectedRow] = useState<AuditRow | null>(null)
-  const [selectedRowIdx, setSelectedRowIdx] = useState<number>(0)
   const [activeTab, setActiveTab] = useState<Tab>('audit')
   const [loading, setLoading] = useState(false)
   const [apiKey, setApiKey] = useState('')
-  const [contractFiles, setContractFiles] = useState<File[]>([])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   function stopPolling() {
@@ -31,7 +27,6 @@ export default function App() {
 
   async function handleAuditStart(contracts: File[], invoice: File, key: string) {
     setApiKey(key)
-    setContractFiles(contracts)
     setLoading(true)
     setJobStatus(null)
     setSelectedRow(null)
@@ -58,27 +53,8 @@ export default function App() {
     }
   }
 
-  function handleRowClick(row: AuditRow, idx: number) {
+  function handleRowClick(row: AuditRow) {
     setSelectedRow(row)
-    setSelectedRowIdx(idx)
-  }
-
-  function handleOverride(rowIndex: number, newStatus: string, reason: string) {
-    if (!jobStatus?.report) return
-    const updatedRows = jobStatus.report.rows.map((r, i) =>
-      i === rowIndex
-        ? { ...r, override_status: newStatus, override_reason: reason, overridden_by: 'analyst', overridden_at: new Date().toISOString() }
-        : r
-    )
-    const updatedReport = { ...jobStatus.report, rows: updatedRows }
-    setJobStatus(prev => prev ? { ...prev, report: updatedReport } : prev)
-    // Also update the selected row in the drawer
-    setSelectedRow(updatedRows[rowIndex])
-  }
-
-  function handleBatchReport(report: AuditReport) {
-    setJobStatus({ job_id: report.job_id, status: 'done', message: null, report })
-    setActiveTab('audit')
   }
 
   useEffect(() => () => stopPolling(), [])
@@ -88,8 +64,6 @@ export default function App() {
   const tabs: { id: Tab; icon: React.ReactNode; label: string; badge?: number }[] = [
     { id: 'audit', icon: <BarChart3 size={14} />, label: 'Audit Results', badge: report?.fail_count },
     { id: 'qa', icon: <MessageSquare size={14} />, label: 'Contract Q&A' },
-    { id: 'log', icon: <ClipboardList size={14} />, label: 'Override Log' },
-    { id: 'batch', icon: <Layers size={14} />, label: 'Batch Audit' },
   ]
 
   return (
@@ -103,11 +77,11 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-bold text-slate-100 leading-none">AI Contract Auditor</h1>
-              <p className="text-xs text-slate-400 leading-none mt-0.5">Production-grade · RAG + Reconciler + Confidence scoring</p>
+              <p className="text-xs text-slate-400 leading-none mt-0.5">RAG-powered invoice vs contract validation</p>
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-400">
-            {['GPT-5.5', 'o3', 'ChromaDB', 'LangChain'].map(t => (
+            {['ChromaDB', 'LangChain', 'GPT-4o'].map(t => (
               <span key={t} className="bg-slate-800 border border-slate-700 px-2 py-0.5 rounded">{t}</span>
             ))}
           </div>
@@ -144,21 +118,8 @@ export default function App() {
               </div>
               <h2 className="text-lg font-semibold text-slate-300">No audit results yet</h2>
               <p className="text-sm text-slate-500 mt-1 max-w-sm">
-                Upload contract documents + invoice CSV and click Run Audit.
+                Upload contract documents (PDF, DOCX, XLSX, EML) and an invoice CSV, then click Run Audit.
               </p>
-              <div className="mt-6 grid grid-cols-2 gap-3 text-left max-w-md">
-                {[
-                  ['Structured Excel parser', 'Reads pricing tables directly — no hallucinations'],
-                  ['Regex pre-extractor', 'Deterministic amendment pattern matching'],
-                  ['LLM reasoning (o3/GPT-5.5)', 'Multi-document conflict resolution'],
-                  ['Confidence scoring', 'Per-field 0–100% confidence with review flag'],
-                ].map(([title, desc]) => (
-                  <div key={title} className="bg-slate-800/50 border border-slate-700 rounded-xl p-3">
-                    <p className="text-xs font-semibold text-slate-300">{title}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">{desc}</p>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
 
@@ -168,7 +129,7 @@ export default function App() {
               <div className="w-12 h-12 rounded-full border-4 border-blue-600/30 border-t-blue-500 animate-spin" />
               <p className="text-slate-300 font-medium">{jobStatus?.message ?? 'Processing...'}</p>
               <p className="text-xs text-slate-500 max-w-xs">
-                Effective-date filter → regex pre-extraction → ChromaDB embed → LLM extraction → reconciliation
+                Parse → embed → retrieve top-K chunks → LLM extract → compare → audit report
               </p>
             </div>
           )}
@@ -212,36 +173,7 @@ export default function App() {
                       <ContractQA jobId={report.job_id} apiKey={apiKey} />
                     </div>
                   )}
-                  {activeTab === 'log' && (
-                    <AuditLogPanel jobId={report.job_id} />
-                  )}
-                  {activeTab === 'batch' && (
-                    <BatchUpload
-                      contractFiles={contractFiles}
-                      apiKey={apiKey}
-                      onSelectReport={handleBatchReport}
-                    />
-                  )}
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Batch tab available even without a report */}
-          {!report && !loading && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-              <div className="flex border-b border-slate-800">
-                <button className="flex items-center gap-1.5 px-5 py-3.5 text-sm font-medium border-b-2 border-blue-500 text-blue-400">
-                  <Layers size={14} />
-                  Batch Audit
-                </button>
-              </div>
-              <div className="p-5">
-                <BatchUpload
-                  contractFiles={contractFiles}
-                  apiKey={apiKey}
-                  onSelectReport={handleBatchReport}
-                />
               </div>
             </div>
           )}
@@ -249,13 +181,7 @@ export default function App() {
       </div>
 
       {/* Evidence drawer */}
-      <EvidenceDrawer
-        row={selectedRow}
-        rowIndex={selectedRowIdx}
-        jobId={report?.job_id ?? ''}
-        onClose={() => setSelectedRow(null)}
-        onOverride={handleOverride}
-      />
+      <EvidenceDrawer row={selectedRow} onClose={() => setSelectedRow(null)} />
     </div>
   )
 }

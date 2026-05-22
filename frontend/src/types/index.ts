@@ -21,16 +21,6 @@ export interface AuditRow {
   status: 'PASS' | 'FAIL' | 'WARN'
   explanation: string
   evidence: EvidenceChunk[]
-  confidence: number
-  review_required: boolean
-  sources_agreeing: string[]
-  conflicts: string[]
-  dollar_impact: number
-  quantity: number
-  override_status: string | null
-  override_reason: string | null
-  overridden_by: string | null
-  overridden_at: string | null
 }
 
 export interface AuditReport {
@@ -42,9 +32,6 @@ export interface AuditReport {
   fail_count: number
   warn_count: number
   rows: AuditRow[]
-  total_dollar_exposure: number
-  review_required_count: number
-  notes: string[]
   model_used: string | null
 }
 
@@ -70,18 +57,6 @@ export interface QAResponse {
   sources: QASource[]
 }
 
-export interface AuditLogEntry {
-  job_id: string
-  row_index: number
-  sku: string
-  field_checked: string
-  original_status: string
-  override_status: string
-  reason: string
-  reviewer: string
-  timestamp: string
-}
-
 export function locationLabel(s: QASource | EvidenceChunk): string {
   const parts = [s.source_file]
   if (s.sheet_name) {
@@ -102,8 +77,4 @@ export function sourceTypeIcon(filename: string): string {
   if (filename.endsWith('.eml')) return '📧'
   if (filename.endsWith('.csv')) return '📋'
   return '📁'
-}
-
-export function effectiveStatus(row: AuditRow): 'PASS' | 'FAIL' | 'WARN' {
-  return (row.override_status as 'PASS' | 'FAIL' | 'WARN' | null) ?? row.status
 }

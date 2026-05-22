@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { JobStatus, QAResponse, AuditLogEntry } from '../types'
+import type { JobStatus, QAResponse } from '../types'
 
 const BASE = '/api'
 
@@ -40,26 +40,4 @@ export async function askQuestion(
     headers: { 'Content-Type': 'multipart/form-data' },
   })
   return data
-}
-
-export async function overrideRow(
-  jobId: string,
-  rowIndex: number,
-  newStatus: string,
-  reason: string,
-  reviewer = 'analyst',
-): Promise<{ ok: boolean; log_entry: AuditLogEntry }> {
-  const { data } = await axios.post(`${BASE}/audit/${jobId}/override`, {
-    job_id: jobId,
-    row_index: rowIndex,
-    new_status: newStatus,
-    reason,
-    reviewer,
-  })
-  return data
-}
-
-export async function getAuditLog(jobId: string): Promise<AuditLogEntry[]> {
-  const { data } = await axios.get(`${BASE}/audit/${jobId}/log`)
-  return data.entries as AuditLogEntry[]
 }

@@ -23,13 +23,6 @@ EMBEDDING_MODEL = "text-embedding-3-large"
 
 # Comparator thresholds
 PRICE_TOLERANCE = 0.01            # PASS if abs(delta) ≤ this
-TOTAL_TOLERANCE_ROUNDING = 1.00   # WARN if total delta < this, FAIL if larger
-
-# Confidence scoring
-CONFIDENCE_REVIEW_THRESHOLD = 0.85  # rows below this need human review
-
-# Hallucination guard
-EXCERPT_FUZZY_MATCH_RATIO = 0.70  # excerpt must overlap source by at least this
 
 
 _model_cache: dict[str, str] = {}

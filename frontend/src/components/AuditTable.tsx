@@ -1,9 +1,8 @@
 import React, { useState, useMemo } from 'react'
 import { ChevronDown, ChevronUp, Filter, Download } from 'lucide-react'
 import type { AuditReport, AuditRow } from '../types'
-import { effectiveStatus } from '../types'
+import { sourceTypeIcon } from '../types'
 import { downloadAuditCsv } from '../api/client'
-import { ConfidenceBadge } from './ConfidenceBadge'
 import { cn } from '../utils/cn'
 
 interface Props {
@@ -25,33 +24,31 @@ const FIELD_LABELS: Record<string, string> = {
   sku: 'SKU',
 }
 
-type SortKey = 'sku' | 'field_checked' | 'expected_value' | 'actual_value' | 'delta' | 'status' | 'confidence' | 'dollar_impact'
+type SortKey = 'sku' | 'field_checked' | 'expected_value' | 'actual_value' | 'delta' | 'status'
 type FilterStatus = 'ALL' | 'PASS' | 'FAIL' | 'WARN'
 
 export function AuditTable({ report, onRowClick }: Props) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('ALL')
   const [filterSku, setFilterSku] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('confidence')
-  const [sortAsc, setSortAsc] = useState(true)   // ascending = lowest confidence first
-  const [reviewOnly, setReviewOnly] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>('status')
+  const [sortAsc, setSortAsc] = useState(true)
 
   const skus = useMemo(() => [...new Set(report.rows.map(r => r.sku))], [report])
 
   const filtered = useMemo(() => {
     let rows = report.rows.map((r, i) => ({ ...r, _origIdx: i }))
-    if (filterStatus !== 'ALL') rows = rows.filter(r => effectiveStatus(r) === filterStatus)
+    if (filterStatus !== 'ALL') rows = rows.filter(r => r.status === filterStatus)
     if (filterSku) rows = rows.filter(r => r.sku === filterSku)
-    if (reviewOnly) rows = rows.filter(r => r.review_required)
     rows.sort((a, b) => {
-      let av: string | number = a[sortKey as keyof typeof a] as string | number
-      let bv: string | number = b[sortKey as keyof typeof b] as string | number
+      const av = a[sortKey as keyof typeof a] as string | number
+      const bv = b[sortKey as keyof typeof b] as string | number
       const cmp = typeof av === 'number' && typeof bv === 'number'
         ? av - bv
         : String(av).localeCompare(String(bv))
       return sortAsc ? cmp : -cmp
     })
     return rows
-  }, [report.rows, filterStatus, filterSku, reviewOnly, sortKey, sortAsc])
+  }, [report.rows, filterStatus, filterSku, sortKey, sortAsc])
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc(v => !v)
@@ -65,18 +62,14 @@ export function AuditTable({ report, onRowClick }: Props) {
         ? <ChevronUp size={11} className="text-blue-400" />
         : <ChevronDown size={11} className="text-blue-400" />
 
-  const passCount = report.rows.filter(r => effectiveStatus(r) === 'PASS').length
-  const failCount = report.rows.filter(r => effectiveStatus(r) === 'FAIL').length
-  const warnCount = report.rows.filter(r => effectiveStatus(r) === 'WARN').length
-
   return (
     <div className="space-y-4">
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: 'PASS' as FilterStatus, count: passCount, color: 'text-emerald-400 border-emerald-800 bg-emerald-950/30' },
-          { label: 'FAIL' as FilterStatus, count: failCount, color: 'text-red-400 border-red-800 bg-red-950/30' },
-          { label: 'WARN' as FilterStatus, count: warnCount, color: 'text-amber-400 border-amber-800 bg-amber-950/30' },
+          { label: 'PASS' as FilterStatus, count: report.pass_count, color: 'text-emerald-400 border-emerald-800 bg-emerald-950/30' },
+          { label: 'FAIL' as FilterStatus, count: report.fail_count, color: 'text-red-400 border-red-800 bg-red-950/30' },
+          { label: 'WARN' as FilterStatus, count: report.warn_count, color: 'text-amber-400 border-amber-800 bg-amber-950/30' },
         ].map(({ label, count, color }) => (
           <button
             key={label}
@@ -104,15 +97,6 @@ export function AuditTable({ report, onRowClick }: Props) {
           <option value="">All SKUs</option>
           {skus.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={reviewOnly}
-            onChange={e => setReviewOnly(e.target.checked)}
-            className="rounded"
-          />
-          Review required only
-        </label>
         <div className="flex-1" />
         <button
           onClick={() => downloadAuditCsv(report.job_id)}
@@ -123,7 +107,7 @@ export function AuditTable({ report, onRowClick }: Props) {
         </button>
       </div>
 
-      {/* Table */}
+      {/* Table — exact spec columns */}
       <div className="overflow-x-auto rounded-xl border border-slate-700">
         <table className="w-full text-sm text-left">
           <thead>
@@ -134,9 +118,7 @@ export function AuditTable({ report, onRowClick }: Props) {
                 { key: 'expected_value', label: 'Expected' },
                 { key: 'actual_value', label: 'Actual' },
                 { key: 'delta', label: 'Delta' },
-                { key: 'dollar_impact', label: '$ Impact' },
                 { key: 'status', label: 'Status' },
-                { key: 'confidence', label: 'Confidence' },
               ] as { key: SortKey; label: string }[]).map(({ key, label }) => (
                 <th
                   key={key}
@@ -149,75 +131,55 @@ export function AuditTable({ report, onRowClick }: Props) {
                   </span>
                 </th>
               ))}
+              <th className="px-4 py-3 font-semibold text-slate-400 text-xs uppercase tracking-wide">Explanation</th>
               <th className="px-4 py-3 font-semibold text-slate-400 text-xs uppercase tracking-wide">Evidence</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((row, i) => {
-              const effStatus = effectiveStatus(row)
-              const isOverridden = row.override_status != null
-              return (
-                <tr
-                  key={i}
-                  onClick={() => onRowClick(row, row._origIdx)}
-                  className={cn(
-                    'border-b border-slate-800/60 cursor-pointer transition-colors',
-                    i % 2 === 0 ? 'bg-slate-900' : 'bg-slate-900/40',
-                    'hover:bg-slate-800/70',
-                  )}
-                >
-                  <td className="px-4 py-3 font-mono font-semibold text-slate-200">{row.sku}</td>
-                  <td className="px-4 py-3 text-slate-300">{FIELD_LABELS[row.field_checked] ?? row.field_checked}</td>
-                  <td className="px-4 py-3 font-mono text-slate-300">{row.expected_value}</td>
-                  <td className="px-4 py-3 font-mono text-slate-300">{row.actual_value}</td>
-                  <td className={cn(
-                    'px-4 py-3 font-mono font-semibold',
-                    row.delta === 0 ? 'text-slate-500' : row.delta > 0 ? 'text-red-400' : 'text-amber-400',
-                  )}>
-                    {row.delta > 0 ? `+${row.delta}` : row.delta}
-                  </td>
-                  <td className={cn(
-                    'px-4 py-3 font-mono text-sm',
-                    row.dollar_impact > 0 ? 'text-red-400' : row.dollar_impact < 0 ? 'text-amber-400' : 'text-slate-500',
-                  )}>
-                    {row.dollar_impact !== 0
-                      ? `${row.dollar_impact > 0 ? '+' : ''}$${row.dollar_impact.toFixed(2)}`
-                      : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className={cn('px-2 py-0.5 rounded text-xs font-bold', STATUS_BADGE[effStatus])}>
-                        {effStatus}
+            {filtered.map((row, i) => (
+              <tr
+                key={i}
+                onClick={() => onRowClick(row, row._origIdx)}
+                className={cn(
+                  'border-b border-slate-800/60 cursor-pointer transition-colors',
+                  i % 2 === 0 ? 'bg-slate-900' : 'bg-slate-900/40',
+                  'hover:bg-slate-800/70',
+                )}
+              >
+                <td className="px-4 py-3 font-mono font-semibold text-slate-200">{row.sku}</td>
+                <td className="px-4 py-3 text-slate-300">{FIELD_LABELS[row.field_checked] ?? row.field_checked}</td>
+                <td className="px-4 py-3 font-mono text-slate-300">{row.expected_value}</td>
+                <td className="px-4 py-3 font-mono text-slate-300">{row.actual_value}</td>
+                <td className={cn(
+                  'px-4 py-3 font-mono font-semibold',
+                  row.delta === 0 ? 'text-slate-500' : row.delta > 0 ? 'text-red-400' : 'text-amber-400',
+                )}>
+                  {row.delta > 0 ? `+${row.delta}` : row.delta}
+                </td>
+                <td className="px-4 py-3">
+                  <span className={cn('px-2 py-0.5 rounded text-xs font-bold', STATUS_BADGE[row.status])}>
+                    {row.status}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-400 text-xs max-w-md truncate" title={row.explanation}>
+                  {row.explanation}
+                </td>
+                <td className="px-4 py-3">
+                  {row.evidence.slice(0, 2).map((ev, j) => (
+                    <span
+                      key={j}
+                      title={ev.excerpt}
+                      className="inline-flex items-center gap-0.5 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-400 mr-1 mb-0.5 hover:border-blue-600 transition-colors"
+                    >
+                      {sourceTypeIcon(ev.source_file)}
+                      <span className="max-w-[80px] truncate">
+                        {ev.sheet_name ?? (ev.page_number != null ? `p.${ev.page_number}` : ev.section?.slice(0, 12) ?? ev.source_file)}
                       </span>
-                      {isOverridden && (
-                        <span className="text-xs text-slate-500" title={`Overridden: ${row.override_reason}`}>
-                          ✏️
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <ConfidenceBadge value={row.confidence} reviewRequired={row.review_required} />
-                  </td>
-                  <td className="px-4 py-3">
-                    {row.evidence.slice(0, 2).map((ev, j) => (
-                      <span
-                        key={j}
-                        title={ev.excerpt}
-                        className="inline-flex items-center gap-0.5 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-400 mr-1 mb-0.5 hover:border-blue-600 transition-colors"
-                      >
-                        {ev.source_file.endsWith('.pdf') ? '📄' :
-                         ev.source_file.endsWith('.xlsx') ? '📊' :
-                         ev.source_file.endsWith('.docx') ? '📝' : '📧'}
-                        <span className="max-w-[80px] truncate">
-                          {ev.sheet_name ?? (ev.page_number != null ? `p.${ev.page_number}` : ev.section?.slice(0, 12) ?? ev.source_file)}
-                        </span>
-                      </span>
-                    ))}
-                  </td>
-                </tr>
-              )
-            })}
+                    </span>
+                  ))}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
         {filtered.length === 0 && (
@@ -227,9 +189,7 @@ export function AuditTable({ report, onRowClick }: Props) {
         )}
       </div>
       <p className="text-xs text-slate-500">
-        Showing {filtered.length} of {report.rows.length} audit checks.
-        {sortKey === 'confidence' && sortAsc && ' Sorted by confidence ↑ (lowest confidence first — review these rows first).'}
-        {' '}Click any row to see full evidence and override options.
+        Showing {filtered.length} of {report.rows.length} audit checks. Click any row for full evidence.
       </p>
     </div>
   )

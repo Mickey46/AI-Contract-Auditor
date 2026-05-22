@@ -55,6 +55,7 @@ class ContractTerm(BaseModel):
 
 
 class AuditRow(BaseModel):
+    """The exact spec output: invoice_id, line_id, sku, field_checked, expected, actual, delta, status, explanation, evidence."""
     invoice_id: str
     line_id: int
     sku: str
@@ -65,16 +66,6 @@ class AuditRow(BaseModel):
     status: str  # PASS | FAIL | WARN
     explanation: str
     evidence: list[EvidenceChunk] = Field(default_factory=list)
-    confidence: float = 1.0          # 0.0 to 1.0
-    review_required: bool = False
-    sources_agreeing: list[str] = Field(default_factory=list)
-    conflicts: list[str] = Field(default_factory=list)
-    dollar_impact: float = 0.0       # signed $ over the line quantity
-    quantity: float = 0.0
-    override_status: Optional[str] = None
-    override_reason: Optional[str] = None
-    overridden_by: Optional[str] = None
-    overridden_at: Optional[str] = None
 
 
 class AuditReport(BaseModel):
@@ -88,18 +79,7 @@ class AuditReport(BaseModel):
     fail_count: int
     warn_count: int
     rows: list[AuditRow]
-    total_dollar_exposure: float = 0.0
-    review_required_count: int = 0
-    notes: list[str] = Field(default_factory=list)
     model_used: Optional[str] = None
-
-
-class OverrideRequest(BaseModel):
-    job_id: str
-    row_index: int
-    new_status: str  # PASS | FAIL | WARN
-    reason: str
-    reviewer: str = "anonymous"
 
 
 class QASource(BaseModel):
