@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environment
+backend/venv/
+venv/
+env/
+.env/
+
+# Environment / secrets
+.env
+*.env
+backend/.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ChromaDB / vector store data
+backend/chroma_data/
+backend/chroma_db/
+data/chroma_db/
+*.sqlite3
+*.sqlite
+*.bin
+
+# Uploads / temp
+/tmp/
+backend/uploads/
+backend/app/uploads/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+*.jsonl
+
+# Demo video (large file — hosted on GitHub Releases, not committed)
+*.mov
+*.mp4
+
+# Large binary / generated data (keep scripts, not outputs)
+data/contracts/*.pdf
+data/contracts/*.xlsx
+data/contracts/*.docx
+data/contracts/*.eml
+data/invoices/*.csv
+
+# Handoff (internal planning doc)
+HANDOFF.md
